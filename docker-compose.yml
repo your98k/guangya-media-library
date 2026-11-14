@@ -1,0 +1,14 @@
+services:
+  guangya-media-library:
+    build: .
+    image: guangya-media-library:latest
+    container_name: guangya-media-library
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - ./data:/app/data
+    environment:
+      # 面板与 worker 之间的共享令牌，部署时务必改掉
+      WORKER_TOKEN: "${WORKER_TOKEN:-change-me}"
+      TZ: Asia/Shanghai
+    restart: unless-stopped

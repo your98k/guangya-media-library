@@ -1,0 +1,1 @@
+{"dependencies":{"better-sqlite3":"^12.4.1","express":"^4.19.2"},"description":"Backend for the Guangya media library panel (Express + SQLite).","main":"index.js","name":"guangya-media-library-server","private":true,"scripts":{"start":"node index.js"},"type":"commonjs","version":"1.0.0"}

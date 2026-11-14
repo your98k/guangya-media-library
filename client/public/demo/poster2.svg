@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="342" height="513" viewBox="0 0 342 513">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#5b21b6"/><stop offset="1" stop-color="#0ea5e9"/>
+  </linearGradient></defs>
+  <rect width="342" height="513" fill="url(#g)"/>
+  <path d="M60 220 Q171 130 282 220 L282 250 Q171 170 60 250Z" fill="#fff" opacity="0.3"/>
+  <path d="M60 260 Q171 170 282 260 L282 290 Q171 210 60 290Z" fill="#fff" opacity="0.2"/>
+  <text x="171" y="350" text-anchor="middle" font-family="sans-serif" font-size="34" font-weight="bold" fill="#fff">云端学院</text>
+  <text x="171" y="392" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#e0f2fe">示例海报 · DEMO</text>
+  <text x="171" y="470" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#fff" opacity="0.75">guangya-media-library demo poster</text>
+</svg>
