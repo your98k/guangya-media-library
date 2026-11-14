@@ -162,7 +162,7 @@ WORKER_TOKEN=你在.env里填的暗号 API_BASE=http://localhost:8080 npm run wo
 - 想让示例 worker 的搜索走**真实 TMDB**：去 [TMDB 官网](https://www.themoviedb.org/)注册后在设置里申请一个 API Key，启动时多带一个变量：`TMDB_API_KEY=你的key WORKER_TOKEN=你的暗号 API_BASE=http://localhost:8080 npm run worker`。
 - 写你自己的 worker 时，只需照着 [docs/API.md](docs/API.md) 请求这些接口，并在请求头带上 `Authorization: Bearer <WORKER_TOKEN>`。
 
-仓库另附一个**真实 worker 骨架**（[`worker/real/`](worker/real/README.md)），与上面的示例 worker（只模拟演示）不同：它按真实流程实现——去教父网 / 迷你影视检索替代源、调光鸭接口展开分享验源、按成文规则选版（只补缺集、真人剧只收 ≥2GB 的最大版本、动漫不设门槛、一集只存最大的一版）。使用它需要部署者自备各站登录 Cookie、光鸭登录态与 TMDB key；**默认 dry-run**，只检索验源并把候选报告写回请求，不动网盘；配置齐全并开启 `GUANGYA_INGEST=on` 后才真转存，真转存成功后还可联动 Drivemby 刷新入库目录。启用方式：`docker compose --profile worker up -d --build`，环境变量与诚实边界见其 [README](worker/real/README.md)。
+仓库另附一个**真实 worker 骨架**（[`worker/real/`](worker/real/README.md)），与上面的示例 worker（只模拟演示）不同：它按真实流程实现——去教父网 / 迷你影视检索替代源、调光鸭接口展开分享验源、按版本偏好选版（只补缺集、一集只存一版；偏好可配置：`VERSION_POLICY=max` 取最大高码 / `min` 取最小低码 / `any` 有即可——纯个人口味，默认 max 只是默认值）。使用它需要部署者自备各站登录 Cookie、光鸭登录态与 TMDB key；**默认 dry-run**，只检索验源并把候选报告写回请求，不动网盘；配置齐全并开启 `GUANGYA_INGEST=on` 后才真转存，真转存成功后还可联动 Drivemby 刷新入库目录。启用方式：`docker compose --profile worker up -d --build`，环境变量与诚实边界见其 [README](worker/real/README.md)。
 
 ### 常见问题
 

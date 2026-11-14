@@ -3,7 +3,7 @@
  * index.mjs — 真实 worker 骨架主循环。
  *
  * 与示例 worker 的区别：这个 worker 真的去聚合站检索、验光鸭分享、
- * 按成文规则选版，并在开启 GUANGYA_INGEST 且配置齐全时真转存。
+ * 按可配置的版本偏好选版，并在开启 GUANGYA_INGEST 且配置齐全时真转存。
  * 默认 dry-run：只检索验源出报告，不动网盘。
  *
  * 环境变量一览见 worker/real/README.md。这里只列主循环用到的：
@@ -66,6 +66,7 @@ async function main() {
   log(`聚合站检索：教父网 ${jiaofuConfigured() ? '开' : '关（未配置 JIAOFU_COOKIE）'}；迷你影视 ${miniConfigured() ? '开' : '关（未配置 MINI_COOKIE）'}`);
   log(`光鸭接口：${guangyaConfigured() ? '开（登录态已配置）' : '关（未配置 GUANGYA_COOKIE / GUANGYA_SESSION_FILE，验源与转存不可用）'}`);
   log(`真转存：${process.env.GUANGYA_INGEST === 'on' ? '开（GUANGYA_INGEST=on）' : '关（dry-run：只检索验源出报告，不动网盘）'}`);
+  log(`版本偏好：${String(process.env.VERSION_POLICY || 'max').toLowerCase()}（VERSION_POLICY：max 取最大高码 / min 取最小低码 / any 第一个找到的，纯个人口味）`);
   log(`Drivemby 联动：${drivembyConfigured() ? `开（${drivembyRefreshUrl()}）` : '关（未配置 DRIVEMBY_TOKEN）'}`);
   log(`轮询间隔：${POLL_MS / 1000}s`);
 

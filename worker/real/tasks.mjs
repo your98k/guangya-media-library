@@ -3,7 +3,7 @@
  *
  * 总原则（诚实边界）：
  * - 面板只排队，活在这里干；干不成如实把请求标 failed 并写明原因，绝不假成功。
- * - 默认 dry-run：检索、验源、按规则选版、把候选报告写进 result_note，
+ * - 默认 dry-run：检索、验源、按版本偏好（VERSION_POLICY）选版、把候选报告写进 result_note，
  *   不动网盘。只有 GUANGYA_INGEST=on 且光鸭登录态已配置、且该剧的入库
  *   文件夹已知（GUANGYA_LIBRARY_MAP）时，才真正转存+改名。
  * - 真转存成功后，若配置了 Drivemby，会逐个入库目录触发一次刷新；
@@ -33,6 +33,9 @@ const failed = (req, note) =>
 function ingestEnabled() {
   return process.env.GUANGYA_INGEST === 'on' && guangya.guangyaConfigured();
 }
+
+// 版本偏好：max（高码）/ min（低码）/ any（有即可），纯个人口味，默认 max。
+const VERSION_POLICY = rules.normalizePolicy(process.env.VERSION_POLICY);
 
 function ingestBlockers(title) {
   const out = [];
@@ -224,7 +227,6 @@ export async function handleFix(req) {
   }
   const linksData = await panel.getWatchLinks();
   const group = findLinkGroup(linksData, show, p);
-  const liveAction = (show?.category || '') === '剧集';
 
   // 待补集：优先看板 pending，其次从问题文本里抠集号
   let wanted = (show?.pending || []).map(rules.parsePendingEpisode).filter(Boolean);
@@ -250,13 +252,13 @@ export async function handleFix(req) {
   const gyCandidates = candidates.filter((c) => c.kind === 'guangyapan');
   const magnetCount = candidates.filter((c) => c.kind === 'magnet').length;
 
-  await progress(req, 50, '逐个验分享并按规则选版');
+  await progress(req, 50, '逐个验分享并按版本偏好选版');
   const evaluated = [];
   for (const cand of gyCandidates) {
     try {
       const files = await guangya.walkShare(cand.url);
       const pick = wantedEps.length
-        ? rules.pickEpisodes(files, wantedEps, { liveAction })
+        ? rules.pickEpisodes(files, wantedEps, { policy: VERSION_POLICY })
         : { chosen: new Map(), unmet: [] };
       evaluated.push({ cand, files, pick });
     } catch (e) {
@@ -264,9 +266,16 @@ export async function handleFix(req) {
     }
   }
   const usable = evaluated.filter((e) => !e.error);
-  usable.sort((a, b) =>
-    (b.pick.chosen.size - a.pick.chosen.size) ||
-    ([...b.pick.chosen.values()].reduce((s, f) => s + f.size, 0) - [...a.pick.chosen.values()].reduce((s, f) => s + f.size, 0)));
+  // 来源排序：先比能补上的集数（多者优先）；同覆盖时按版本偏好比总体积
+  // （max 大者优先 / min 小者优先 / any 不比，保持检索顺序）。
+  const totalSize = (e) => [...e.pick.chosen.values()].reduce((s, f) => s + Number(f.size), 0);
+  usable.sort((a, b) => {
+    const byCoverage = b.pick.chosen.size - a.pick.chosen.size;
+    if (byCoverage !== 0) return byCoverage;
+    if (VERSION_POLICY === 'max') return totalSize(b) - totalSize(a);
+    if (VERSION_POLICY === 'min') return totalSize(a) - totalSize(b);
+    return 0;
+  });
   const best = usable[0];
   const bestCovers = best && (wantedEps.length ? best.pick.chosen.size > 0 : best.files.length > 0);
 
@@ -284,7 +293,7 @@ export async function handleFix(req) {
   }
 
   if (!bestCovers) {
-    await failed(req, ['两站均未找到符合规则的替代源，需要人工提供链接。', ...reportLines].join('\n'));
+    await failed(req, [`两站均未找到可用的替代源（版本偏好：${VERSION_POLICY}），需要人工提供链接。`, ...reportLines].join('\n'));
     return;
   }
 

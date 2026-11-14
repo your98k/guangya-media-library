@@ -1,11 +1,11 @@
 /**
  * rules.mjs — 选版规则（纯函数，可独立测试）。
  *
- * 这里固化的是部署者与运维方约定成文的「家规」：
- * - 一集只存一个版本：同集多版本只留最大的（高码）那个；
- * - 真人剧（剧集）有大小门槛：单集文件 < 2GB 不收（留待大版本），≥2GB 里取最大；
- * - 动漫不套大小门槛：有多大收多大，取最大；
- * - 只补缺集：不在待补清单里的集数一律不碰；
+ * 只有两条是硬规则，其余是「版本偏好」，由部署者按自己的口味配置：
+ * - 硬规则：一集只存一个版本；只补缺集（不在待补清单里的集数一律不碰）；
+ * - 版本偏好（环境变量 VERSION_POLICY，纯个人口味，没有对错）：
+ *   max = 每集取最大的那个（喜欢高码）；min = 每集取最小的那个（喜欢低码、省空间）；
+ *   any = 每集取第一个找到的（有什么看什么）。默认 max 只是默认值，不代表推荐。
  * - 改名只写可证实的规格：源文件名里没写的规格字段不编造。
  */
 
@@ -15,9 +15,6 @@ export const SHARE_URL_RE = /^https:\/\/www\.guangyapan\.com\/s\/[A-Za-z0-9]+_[A
 export function isGuangyaShareUrl(url) {
   return typeof url === 'string' && SHARE_URL_RE.test(url.trim());
 }
-
-// 真人剧单集大小门槛：2GB（按 2×1000³ 计算，与库内既有口径一致）。
-export const LIVE_ACTION_MIN_BYTES = 2e9;
 
 const FULLWIDTH_DIGITS = /[０-９]/g;
 function normalizeName(name) {
@@ -98,16 +95,23 @@ export function parseLibraryHave(text) {
   return have;
 }
 
+/** 版本偏好合法值：max（高码）/ min（低码）/ any（有即可）。非法或未设置一律按 max。 */
+export function normalizePolicy(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  return s === 'min' || s === 'any' ? s : 'max';
+}
+
 /**
- * 核心选版：对每个待补集号，从候选文件里挑出唯一要存的那个。
+ * 核心选版：对每个待补集号，从候选文件里按版本偏好挑出唯一要存的那个。
  *
  * @param {Array<{id:string,name:string,size:number}>} files 候选文件（可来自多个分享，调用方按来源分别调用）
  * @param {number[]} wantedEpisodes 待补集号
- * @param {{liveAction?: boolean}} opts liveAction=true 时启用 2GB 门槛
+ * @param {{policy?: string}} opts policy: max 每集取最大 / min 每集取最小 / any 每集取第一个找到的
  * @returns {{chosen: Map<number, object>, unmet: number[]}}
- *   chosen: 集号 → 选中的文件；unmet: 没有合格文件的集号（真人剧全是小版本时也会落在这里）。
+ *   chosen: 集号 → 选中的文件；unmet: 候选里根本没有的集号。
  */
-export function pickEpisodes(files, wantedEpisodes, { liveAction = false } = {}) {
+export function pickEpisodes(files, wantedEpisodes, { policy = 'max' } = {}) {
+  const pol = normalizePolicy(policy);
   const wanted = new Set(wantedEpisodes);
   const byEp = new Map();
   for (const f of files || []) {
@@ -120,13 +124,16 @@ export function pickEpisodes(files, wantedEpisodes, { liveAction = false } = {})
   const unmet = [];
   for (const ep of wanted) {
     const cands = byEp.get(ep) || [];
-    const eligible = liveAction ? cands.filter((f) => Number(f.size) >= LIVE_ACTION_MIN_BYTES) : cands;
-    if (!eligible.length) {
+    if (!cands.length) {
       unmet.push(ep);
       continue;
     }
-    eligible.sort((a, b) => Number(b.size) - Number(a.size));
-    chosen.set(ep, eligible[0]);
+    if (pol === 'any') {
+      chosen.set(ep, cands[0]);
+    } else {
+      const sorted = [...cands].sort((a, b) => Number(a.size) - Number(b.size));
+      chosen.set(ep, pol === 'min' ? sorted[0] : sorted[sorted.length - 1]);
+    }
   }
   return { chosen, unmet };
 }
