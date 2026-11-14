@@ -14,8 +14,10 @@ ENV NODE_ENV=production \
     TZ=Asia/Shanghai
 WORKDIR /app
 COPY --from=build /build/client/dist ./client/dist
-COPY --from=build /build/server/node_modules ./server/node_modules
 COPY server/ ./server/
+# node_modules 必须最后从构建阶段拷入，覆盖源码目录可能带入的本地模块，
+# 保证原生模块（如 better-sqlite3）与镜像内 Node 版本一致
+COPY --from=build /build/server/node_modules ./server/node_modules
 COPY worker/ ./worker/
 RUN mkdir -p /app/data && chown -R node:node /app
 USER node
