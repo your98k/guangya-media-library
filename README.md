@@ -162,6 +162,8 @@ WORKER_TOKEN=你在.env里填的暗号 API_BASE=http://localhost:8080 npm run wo
 - 想让示例 worker 的搜索走**真实 TMDB**：去 [TMDB 官网](https://www.themoviedb.org/)注册后在设置里申请一个 API Key，启动时多带一个变量：`TMDB_API_KEY=你的key WORKER_TOKEN=你的暗号 API_BASE=http://localhost:8080 npm run worker`。
 - 写你自己的 worker 时，只需照着 [docs/API.md](docs/API.md) 请求这些接口，并在请求头带上 `Authorization: Bearer <WORKER_TOKEN>`。
 
+仓库另附一个**真实 worker 骨架**（[`worker/real/`](worker/real/README.md)），与上面的示例 worker（只模拟演示）不同：它按真实流程实现——去教父网 / 迷你影视检索替代源、调光鸭接口展开分享验源、按成文规则选版（只补缺集、真人剧只收 ≥2GB 的最大版本、动漫不设门槛、一集只存最大的一版）。使用它需要部署者自备各站登录 Cookie、光鸭登录态与 TMDB key；**默认 dry-run**，只检索验源并把候选报告写回请求，不动网盘；配置齐全并开启 `GUANGYA_INGEST=on` 后才真转存，真转存成功后还可联动 Drivemby 刷新入库目录。启用方式：`docker compose --profile worker up -d --build`，环境变量与诚实边界见其 [README](worker/real/README.md)。
+
 ### 常见问题
 
 - **点了「提交修复请求」后，问题会自动修好吗？** 不会——面板只负责把请求记进队列，它自己不操作网盘。真正处理请求的是你接入的 **worker**：仓库自带的示例 worker 只演示流程（领取请求 → 回写一条说明，写明真实实现要做什么），**不会真的去找替代来源、转存或改动网盘里的任何文件**。想实现自动修复 / 自动入库，需要按 [docs/API.md](docs/API.md) 接入你自己的 worker（普通脚本、定时任务或智能体都可以）。同理，「立即扫描这部」「扫描未分类影视」「刷新目录」等按钮都是先生成一条请求、等 worker 来执行；**没有 worker 在运行时，提交的请求会一直停在「等待处理」**，这是正常现象，不是卡住了。

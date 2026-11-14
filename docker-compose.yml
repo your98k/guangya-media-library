@@ -12,3 +12,34 @@ services:
       WORKER_TOKEN: "${WORKER_TOKEN:-change-me}"
       TZ: Asia/Shanghai
     restart: unless-stopped
+
+  # 真实 worker 骨架（worker/real）：默认不启动，需要时显式带 profile：
+  #   docker compose --profile worker up -d --build
+  # 不带 --profile worker 时行为与之前完全一致。
+  worker:
+    profiles: ["worker"]
+    build:
+      context: .
+      dockerfile: worker/real/Dockerfile
+    image: guangya-media-library-worker:latest
+    container_name: guangya-media-library-worker
+    environment:
+      API_BASE: http://guangya-media-library:8080
+      WORKER_TOKEN: ${WORKER_TOKEN:-change-me}
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
+      JIAOFU_COOKIE: ${JIAOFU_COOKIE:-}
+      MINI_COOKIE: ${MINI_COOKIE:-}
+      GUANGYA_COOKIE: ${GUANGYA_COOKIE:-}
+      GUANGYA_SESSION_FILE: ${GUANGYA_SESSION_FILE:-}
+      GUANGYA_INGEST: ${GUANGYA_INGEST:-off}
+      GUANGYA_LIBRARY_MAP: ${GUANGYA_LIBRARY_MAP:-}
+      GUANGYA_UNCLASSIFIED_FOLDER_ID: ${GUANGYA_UNCLASSIFIED_FOLDER_ID:-}
+      GUANGYA_CATEGORY_IDS: ${GUANGYA_CATEGORY_IDS:-}
+      SOURCE_DELAY_MS: ${SOURCE_DELAY_MS:-1500}
+      WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-15}
+      DRIVEMBY_TOKEN: ${DRIVEMBY_TOKEN:-}
+      DRIVEMBY_REFRESH_URL: ${DRIVEMBY_REFRESH_URL:-https://drivemby.com/api/hooks/refresh}
+      TZ: Asia/Shanghai
+    depends_on:
+      - guangya-media-library
+    restart: unless-stopped
