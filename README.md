@@ -15,6 +15,8 @@
   面板只负责管理与展示；查分享、转存等真实自动化由外部 <b>worker</b> 通过带令牌的接口对接（仓库自带示例 worker）。
 </p>
 
+> **项目定位：** 本项目不依赖任何 AI 智能体即可独立运行全套日常自动化（轮询、验源、转存、改名、转移、排重、选版、刷新）；智能体只是可选增强，用于搜新源、失效换源这类需要判断的场景。
+
 > **English summary:** A self-hosted web panel for managing a Guangya （光鸭云盘） media library: a watch board for tracked shows, a full-library poster catalog, an unclassified-folder auto-scan panel, TMDB search & share-link submission, and a request queue. State lives in a local SQLite file; the actual cloud-drive automation runs in an external "worker" that talks to a token-protected API (an example worker is included). Unofficial third-party project, not affiliated with Guangya. Demo seed data is entirely fictional.
 
 ---
@@ -44,6 +46,8 @@
 ## ✨ 功能亮点
 
 - **追更看板**：每部在追的作品一张卡——海报、库内进度、待补集数、下集时间、来源链接（条数不限，2 条显示「双源」、≥3 条显示「N 源」）、链接管理、逐部独立的扫描控制（立即扫描这部 / 暂停恢复 / 自定义间隔 / 实时进度条）、取消追更；顶部有全局扫描进度条；缺集、分享失效等问题卡带「提交修复请求 / 我来提供链接」（修复请求只是排队，由你接入的 worker 领取执行，面板本身不操作网盘，详见下方常见问题第一条）。
+- **自主追更轮询**：真实 worker 骨架内置定时轮询（默认 30 分钟一轮，可调可关）：到更新时间自动查来源、验源、补缺集、按模板改名、同集排重、回写看板并联动 Drivemby 刷新——全是确定性活，全自动运行，不依赖任何 AI 智能体。
+- **选版设置（面板里自己定）**：同一集存哪个版本由使用者在面板抉择——模式二选一（只存最优版 / 先到先存、发现更优自动替换），评分依据可排序（分辨率 / 画质（HDR·杜比视界）/ 文件大小），文件大小可偏好越大或越小；保存即生效，worker 每轮自动读取。
 - **全量目录**：整个影视库的海报墙（电影 / 剧集 / 动漫分组），分批加载、海报懒加载、片名筛选、总量统计，一键提交目录刷新。
 - **未分类影视面板**：自动整理扫描的开关、自定义间隔（15 分钟–7 天）、本次/上次/下次扫描时间、手动扫描与实时进度。
 - **搜索 / 添加**：TMDB 按片名或 ID 搜索（结果 5 分钟内有效，勾选提交后定稿）；光鸭分享链接提交（**链接格式会被严格校验，不完整的链接当场报错，不会静默失败**）。
@@ -162,11 +166,11 @@ WORKER_TOKEN=你在.env里填的暗号 API_BASE=http://localhost:8080 npm run wo
 - 想让示例 worker 的搜索走**真实 TMDB**：去 [TMDB 官网](https://www.themoviedb.org/)注册后在设置里申请一个 API Key，启动时多带一个变量：`TMDB_API_KEY=你的key WORKER_TOKEN=你的暗号 API_BASE=http://localhost:8080 npm run worker`。
 - 写你自己的 worker 时，只需照着 [docs/API.md](docs/API.md) 请求这些接口，并在请求头带上 `Authorization: Bearer <WORKER_TOKEN>`。
 
-仓库另附一个**真实 worker 骨架**（[`worker/real/`](worker/real/README.md)），与上面的示例 worker（只模拟演示）不同：它按真实流程实现——去教父网 / 迷你影视检索替代源、调光鸭接口展开分享验源、按版本偏好选版（只补缺集、一集只存一版；偏好可配置：`VERSION_POLICY=max` 取最大高码 / `min` 取最小低码 / `any` 有即可——纯个人口味，默认 max 只是默认值）。使用它需要部署者自备各站登录 Cookie、光鸭登录态与 TMDB key；**默认 dry-run**，只检索验源并把候选报告写回请求，不动网盘；配置齐全并开启 `GUANGYA_INGEST=on` 后才真转存，真转存成功后还可联动 Drivemby 刷新入库目录。启用方式：`docker compose --profile worker up -d --build`，环境变量与诚实边界见其 [README](worker/real/README.md)。
+仓库另附一个**真实 worker 骨架**（[`worker/real/`](worker/real/README.md)），与上面的示例 worker（只模拟演示）不同：它内置**自主追更轮询**，自己定时查已登记的来源、验源、补缺集、改名、排重、刷新看板——日常自动化全自动，不依赖任何 AI 智能体；选版按面板「选版设置」执行（模式＋依据排序，保存即生效；环境变量 `VERSION_POLICY` 只在面板从未保存过设置时作回退默认）。只有去教父网 / 迷你影视**搜新源、失效换源**这类需要判断的活不能保证全自动（受站点登录墙/验证码影响，骨架会尝试并如实回写）。使用它需要部署者自备各站登录 Cookie、光鸭登录态与 TMDB key；**默认 dry-run**，只检索验源并把候选报告写回请求，不动网盘；配置齐全并开启 `GUANGYA_INGEST=on` 后才真转存，真转存成功后还可联动 Drivemby 刷新入库目录。启用方式：`docker compose --profile worker up -d --build`，环境变量与诚实边界见其 [README](worker/real/README.md)。
 
 ### 常见问题
 
-- **点了「提交修复请求」后，问题会自动修好吗？** 不会——面板只负责把请求记进队列，它自己不操作网盘。真正处理请求的是你接入的 **worker**：仓库自带的示例 worker 只演示流程（领取请求 → 回写一条说明，写明真实实现要做什么），**不会真的去找替代来源、转存或改动网盘里的任何文件**。想实现自动修复 / 自动入库，需要按 [docs/API.md](docs/API.md) 接入你自己的 worker（普通脚本、定时任务或智能体都可以）。同理，「立即扫描这部」「扫描未分类影视」「刷新目录」等按钮都是先生成一条请求、等 worker 来执行；**没有 worker 在运行时，提交的请求会一直停在「等待处理」**，这是正常现象，不是卡住了。
+- **点了「提交修复请求」后，问题会自动修好吗？** 要分两类活看：①**日常自动化**——追更轮询、验源、转存、改名、转移文件夹、排重、选版、看板/目录刷新、Drivemby 刷新，这些是确定性活，真实 worker 骨架全自动完成，**不需要任何 AI 智能体**；②**修复请求指向的活**——去聚合站**搜新源**、给失效分享**换源**，这类需要判断、又受站点登录墙 / 验证码 / 改版影响，**不能保证全自动**：面板只是把请求记进队列，示例 worker 只演示流程、不会真的去找；真实 worker 骨架会尝试检索与换源，成败都会如实写回请求说明。没有 worker 在运行时，提交的请求会一直停在「等待处理」，这是正常现象，不是卡住了。
 - **打开 http://localhost:8080 没反应？** 先运行 `docker compose ps` 看容器是否在运行；不在就 `docker compose logs` 看报错。Windows/macOS 还要确认 Docker Desktop 已经完全启动。
 - **提示端口被占用（port is already allocated）？** 把 `.env` 里的 `PORT` 改成别的数字（如 `8091`），再 `docker compose up -d`，访问时用新端口。
 - **构建/拉取镜像特别慢？** 多半是网络问题：国内网络可以给 Docker 配置镜像加速（Docker Desktop → Settings → Docker Engine 里添加 `registry-mirrors`，镜像源地址搜「Docker 镜像加速」按当下可用的填），保存重启 Docker 后再试。

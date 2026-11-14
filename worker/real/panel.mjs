@@ -24,6 +24,11 @@ async function call(path, body) {
   return data;
 }
 
+/** 读取面板选版设置（worker 接口，需令牌）：{version_mode, version_criteria, version_size_prefer} */
+export async function getSettings() {
+  return call('/api/worker/settings');
+}
+
 /** 领取全部 pending + processing 请求（旧在前）。 */
 export async function getPending() {
   const { requests } = await call('/api/worker/requests/pending');

@@ -3,8 +3,9 @@
  *
  * 总原则（诚实边界）：
  * - 面板只排队，活在这里干；干不成如实把请求标 failed 并写明原因，绝不假成功。
- * - 默认 dry-run：检索、验源、按版本偏好（VERSION_POLICY）选版、把候选报告写进 result_note，
- *   不动网盘。只有 GUANGYA_INGEST=on 且光鸭登录态已配置、且该剧的入库
+ * - 默认 dry-run：检索、验源、按面板「选版设置」选版（面板未设置时回退
+ *   env VERSION_POLICY 的映射）、把候选报告写进 result_note，不动网盘。
+ *   只有 GUANGYA_INGEST=on 且光鸭登录态已配置、且该剧的入库
  *   文件夹已知（GUANGYA_LIBRARY_MAP）时，才真正转存+改名。
  * - 真转存成功后，若配置了 Drivemby，会逐个入库目录触发一次刷新；
  *   刷新失败只在 result_note 末尾附一句，不影响入库结果。
@@ -34,8 +35,36 @@ function ingestEnabled() {
   return process.env.GUANGYA_INGEST === 'on' && guangya.guangyaConfigured();
 }
 
-// 版本偏好：max（高码）/ min（低码）/ any（有即可），纯个人口味，默认 max。
-const VERSION_POLICY = rules.normalizePolicy(process.env.VERSION_POLICY);
+/* ---------------- 选版设置（面板优先，env 回退） ---------------- */
+
+let activeSettings = rules.defaultSettings();
+let activeSettingsSource = 'env';
+
+/** 当前生效的选版设置（由 refreshVersionSettings 每轮刷新）。 */
+export function currentSettings() {
+  return activeSettings;
+}
+
+/** 本轮设置来源：'panel'（面板已保存）| 'env'（VERSION_POLICY 回退）。 */
+export function currentSettingsSource() {
+  return activeSettingsSource;
+}
+
+/**
+ * 从面板拉最新选版设置；面板不可达或接口 404 时回退到 env 映射。
+ * 每轮轮询开始时由 index.mjs 调用；不抛错。
+ */
+export async function refreshVersionSettings() {
+  try {
+    const s = await panel.getSettings();
+    activeSettings = rules.normalizeSettings(s);
+    activeSettingsSource = 'panel';
+  } catch {
+    activeSettings = rules.defaultSettings();
+    activeSettingsSource = 'env';
+  }
+  return { settings: activeSettings, source: activeSettingsSource };
+}
 
 function ingestBlockers(title) {
   const out = [];
@@ -46,7 +75,7 @@ function ingestBlockers(title) {
 }
 
 let libraryMapCache = null;
-function libraryMap() {
+export function libraryMap() {
   if (libraryMapCache) return libraryMapCache;
   try {
     libraryMapCache = JSON.parse(process.env.GUANGYA_LIBRARY_MAP || '{}');
@@ -57,7 +86,7 @@ function libraryMap() {
   return libraryMapCache;
 }
 
-function findShow(board, { tmdb_id, title, show_key } = {}) {
+export function findShow(board, { tmdb_id, title, show_key } = {}) {
   const shows = board?.shows || [];
   if (show_key) {
     const byKey = shows.find((s) => s.key === show_key);
@@ -73,7 +102,7 @@ function findShow(board, { tmdb_id, title, show_key } = {}) {
   return null;
 }
 
-function findLinkGroup(linksData, show, { tmdb_id, title } = {}) {
+export function findLinkGroup(linksData, show, { tmdb_id, title } = {}) {
   const groups = linksData?.links || [];
   const tid = tmdb_id ?? show?.tmdb_id;
   const t = title || show?.title;
@@ -103,7 +132,7 @@ function findCatalogEntry(catalog, show, title) {
  * 作品夹名优先取目录快照的 folder_name，其次按「片名 (年份)」约定拼；
  * 拿不到季信息时只刷作品夹路径。
  */
-function drivePathsFor(show, catalog, seasons = []) {
+export function drivePathsFor(show, catalog, seasons = []) {
   const found = findCatalogEntry(catalog, show, show?.title);
   const folderName = found?.entry?.folder_name || (show?.year ? `${show.title} (${show.year})` : show?.title || '');
   const category = found?.category || show?.category || '';
@@ -113,7 +142,7 @@ function drivePathsFor(show, catalog, seasons = []) {
 }
 
 /** 对每个入库目录调一次 Drivemby 刷新，返回要附在 result_note 末尾的话（未配置时返回 ''）。 */
-async function drivembySuffix(paths) {
+export async function drivembySuffix(paths) {
   if (!drivembyConfigured()) return '';
   const failures = [];
   for (const p of paths) {
@@ -130,7 +159,7 @@ async function drivembySuffix(paths) {
  * 注意 restore_share 落地有延迟，这里等 3 秒后按名找一次，找不到的集号
  * 如实报 lost（不假装改名成功），部署者可按 lost 清单人工复查。
  */
-async function ingestChosen({ sourceUrl, code, folderId, show, season, chosen }) {
+export async function ingestChosen({ sourceUrl, code, folderId, show, season, chosen }) {
   const files = [...chosen.values()];
   await guangya.saveShareFiles(sourceUrl, folderId, files.map((f) => f.id), code);
   await sleep(3000);
@@ -151,7 +180,7 @@ async function ingestChosen({ sourceUrl, code, folderId, show, season, chosen })
 }
 
 /** 入库后回写看板：把已补集号从 pending 移除，并给 library_have 追加说明。 */
-async function markBoardFixed(show, fixedEps, season) {
+export async function markBoardFixed(show, fixedEps, season) {
   const { board } = await panel.getBoard();
   if (!board?.shows) return;
   const target = board.shows.find((s) => s.key === show.key) || findShow(board, show);
@@ -165,6 +194,133 @@ async function markBoardFixed(show, fixedEps, season) {
   target.library_have = `${target.library_have || ''}；已补 ${labels}`.replace(/^；/, '');
   board.generated_at = new Date().toISOString();
   await panel.pushBoard(board);
+}
+
+/* ---------------- 升级替换与排重（fix / watchscan / 自主轮询共用同一套实现） ---------------- */
+
+/** 列出库内某 Season 文件夹现有文件，按集号归拢：Map<集号, 文件>（同集多份时留最大的一份作比对基准）。 */
+export async function loadExistingByEp(folderId) {
+  const items = await guangya.listFolder(folderId);
+  const byEp = new Map();
+  for (const it of items) {
+    if (it.isDir) continue;
+    const ep = rules.parseEpisodeNo(it.name);
+    if (ep == null) continue;
+    const prev = byEp.get(ep);
+    if (!prev || Number(it.size) > Number(prev.size)) byEp.set(ep, it);
+  }
+  return byEp;
+}
+
+/**
+ * 规划升级（any_upgrade 模式）：在已走过的候选分享里，为库内已有的集找更优版本。
+ * shares: [{url, code, site, files}]（按优先顺序，先到先得）；
+ * skipEps: 本轮刚补的新集，不重复动。返回 [{ep, cand, file, existing}]（按集号升序）。
+ */
+export function planUpgrades(shares, existingByEp, skipEps, settings) {
+  const out = [];
+  const planned = new Set();
+  for (const sh of shares || []) {
+    for (const f of sh.files || []) {
+      const ep = rules.parseEpisodeNo(f.name);
+      if (ep == null || planned.has(ep) || skipEps.has(ep)) continue;
+      const existing = existingByEp.get(ep);
+      if (!existing) continue;
+      if (rules.isBetter(f, existing, settings)) {
+        out.push({ ep, cand: sh, file: f, existing });
+        planned.add(ep);
+      }
+    }
+  }
+  return out.sort((a, b) => a.ep - b.ep);
+}
+
+/**
+ * 执行或报告升级替换，返回 {lines, replaced}：
+ * - 非真转存条件（dry-run 等）→ 只列出可升级项与新旧对比；
+ * - 真转存但未配置 GUANGYA_QUARANTINE_FOLDER_ID → 只报告、不替换；
+ * - 条件齐全 → 逐集替换：新版转存进 Season 文件夹并确认落地 → 旧版移入
+ *   隔离文件夹 → 新版按库内模板改名。单集失败只记该集，不中断其余集。
+ */
+export async function applyUpgrades({ upgrades, folderId, show, season, settings }) {
+  if (!upgrades.length) return { lines: [], replaced: [] };
+  const describe = (u) => `E${u.ep}：库内「${u.existing.name}」（${rules.describeFile(u.existing)}）→ 更优「${u.file.name}」（${rules.describeFile(u.file)}，来源 ${u.cand.site || u.cand.url}）`;
+  if (!ingestEnabled() || !folderId) {
+    return { lines: upgrades.map((u) => `可升级（先存后优）：${describe(u)}`), replaced: [] };
+  }
+  const quarantineId = process.env.GUANGYA_QUARANTINE_FOLDER_ID || '';
+  if (!quarantineId) {
+    return {
+      lines: [
+        `发现更优版本，未配置 GUANGYA_QUARANTINE_FOLDER_ID，未替换：${upgrades.map((u) => `E${u.ep}`).join('、')}。`,
+        ...upgrades.map(describe),
+      ],
+      replaced: [],
+    };
+  }
+  const lines = [];
+  const replaced = [];
+  for (const u of upgrades) {
+    try {
+      await guangya.saveShareFiles(u.cand.url, folderId, [u.file.id], u.cand.code);
+      await sleep(3000);
+      const landed = await guangya.listFolder(folderId);
+      const landedFile = landed.find((f) => f.name === u.file.name && f.id !== u.existing.id);
+      if (!landedFile) {
+        lines.push(`E${u.ep} 升级替换未完成：新版转存后未在目标文件夹找到，旧版未动。`);
+        continue;
+      }
+      await guangya.moveFile(u.existing.id, quarantineId);
+      const targetName = rules.buildLibraryFileName({
+        title: show.title, year: show.year, season, episode: u.ep, sourceName: u.file.name,
+      });
+      if (landedFile.name !== targetName) await guangya.renameFile(landedFile.id, targetName);
+      replaced.push(u.ep);
+      lines.push(`已升级替换 ${describe(u)}；旧版已移入隔离文件夹，新版已改名为「${targetName}」。`);
+    } catch (e) {
+      lines.push(`E${u.ep} 升级替换失败：${e.message}（请人工复查该集新旧文件状态）。`);
+    }
+  }
+  return { lines, replaced };
+}
+
+/**
+ * 排重：某 Season 文件夹里同一集多份时，按选版设置留最优的一份，
+ * 其余移入 GUANGYA_QUARANTINE_FOLDER_ID；未配隔离夹则全部保留并说明。
+ * 返回说明行数组（无重复时为空数组）。
+ */
+export async function dedupeFolder(folderId, settings) {
+  const items = await guangya.listFolder(folderId);
+  const byEp = new Map();
+  for (const it of items) {
+    if (it.isDir) continue;
+    const ep = rules.parseEpisodeNo(it.name);
+    if (ep == null) continue;
+    if (!byEp.has(ep)) byEp.set(ep, []);
+    byEp.get(ep).push(it);
+  }
+  const dupEps = [...byEp.entries()].filter(([, list]) => list.length > 1);
+  if (!dupEps.length) return [];
+  const quarantineId = process.env.GUANGYA_QUARANTINE_FOLDER_ID || '';
+  if (!quarantineId) {
+    return [`同集多份未处理（未配置 GUANGYA_QUARANTINE_FOLDER_ID）：${dupEps.map(([ep, list]) => `E${ep} 共 ${list.length} 份`).join('、')}。`];
+  }
+  const lines = [];
+  for (const [ep, list] of dupEps.sort((a, b) => a[0] - b[0])) {
+    const keep = list.reduce((best, f) => (rules.compareFiles(f, best, settings) > 0 ? f : best), list[0]);
+    const moved = [];
+    for (const f of list) {
+      if (f.id === keep.id) continue;
+      try {
+        await guangya.moveFile(f.id, quarantineId);
+        moved.push(f.name);
+      } catch (e) {
+        lines.push(`E${ep} 排重移动「${f.name}」失败：${e.message}`);
+      }
+    }
+    if (moved.length) lines.push(`排重 E${ep}：保留「${keep.name}」，多余 ${moved.length} 份已移入隔离文件夹。`);
+  }
+  return lines;
 }
 
 /* ---------------- search ---------------- */
@@ -227,6 +383,7 @@ export async function handleFix(req) {
   }
   const linksData = await panel.getWatchLinks();
   const group = findLinkGroup(linksData, show, p);
+  const SETTINGS = currentSettings();
 
   // 待补集：优先看板 pending，其次从问题文本里抠集号
   let wanted = (show?.pending || []).map(rules.parsePendingEpisode).filter(Boolean);
@@ -252,13 +409,13 @@ export async function handleFix(req) {
   const gyCandidates = candidates.filter((c) => c.kind === 'guangyapan');
   const magnetCount = candidates.filter((c) => c.kind === 'magnet').length;
 
-  await progress(req, 50, '逐个验分享并按版本偏好选版');
+  await progress(req, 50, '逐个验分享并按选版设置挑版本');
   const evaluated = [];
   for (const cand of gyCandidates) {
     try {
       const files = await guangya.walkShare(cand.url);
       const pick = wantedEps.length
-        ? rules.pickEpisodes(files, wantedEps, { policy: VERSION_POLICY })
+        ? rules.pickBySettings(files, wantedEps, SETTINGS)
         : { chosen: new Map(), unmet: [] };
       evaluated.push({ cand, files, pick });
     } catch (e) {
@@ -266,15 +423,20 @@ export async function handleFix(req) {
     }
   }
   const usable = evaluated.filter((e) => !e.error);
-  // 来源排序：先比能补上的集数（多者优先）；同覆盖时按版本偏好比总体积
-  // （max 大者优先 / min 小者优先 / any 不比，保持检索顺序）。
+  // 来源排序：先比能补上的集数（多者优先）；any_upgrade 模式同覆盖时保持
+  // 检索顺序（先到先存）；best 模式再比所选文件的综合评分，最后比总体积。
   const totalSize = (e) => [...e.pick.chosen.values()].reduce((s, f) => s + Number(f.size), 0);
+  const qualityIndex = (e) => [...e.pick.chosen.values()].reduce((s, f) => {
+    const sc = rules.scoreFile(f);
+    return s + sc.resolution * 100 + sc.hdr * 10;
+  }, 0);
   usable.sort((a, b) => {
     const byCoverage = b.pick.chosen.size - a.pick.chosen.size;
     if (byCoverage !== 0) return byCoverage;
-    if (VERSION_POLICY === 'max') return totalSize(b) - totalSize(a);
-    if (VERSION_POLICY === 'min') return totalSize(a) - totalSize(b);
-    return 0;
+    if (SETTINGS.version_mode === 'any_upgrade') return 0;
+    const byQuality = qualityIndex(b) - qualityIndex(a);
+    if (byQuality !== 0) return byQuality;
+    return SETTINGS.version_size_prefer === 'smaller' ? totalSize(a) - totalSize(b) : totalSize(b) - totalSize(a);
   });
   const best = usable[0];
   const bestCovers = best && (wantedEps.length ? best.pick.chosen.size > 0 : best.files.length > 0);
@@ -286,21 +448,41 @@ export async function handleFix(req) {
   for (const e of usable) {
     const parts = [...e.pick.chosen.entries()].map(([ep, f]) => `E${ep} ${rules.formatBytes(f.size)}`);
     reportLines.push(`候选 ${e.cand.url}（${e.cand.site}，共 ${e.files.length} 个文件）${wantedEps.length ? `：可补 ${parts.join('、') || '无'}` : ''}`);
-    if (e.pick.unmet?.length) reportLines.push(`  未满足（无合格版本）：${e.pick.unmet.map((x) => `E${x}`).join('、')}`);
+    if (e.pick.unmet?.length) reportLines.push(`  未满足（候选里没有这一集）：${e.pick.unmet.map((x) => `E${x}`).join('、')}`);
   }
   for (const e of evaluated.filter((x) => x.error)) {
     reportLines.push(`候选 ${e.cand.url}：验源失败（${e.error.message}）`);
   }
 
   if (!bestCovers) {
-    await failed(req, [`两站均未找到可用的替代源（版本偏好：${VERSION_POLICY}），需要人工提供链接。`, ...reportLines].join('\n'));
+    await failed(req, [`两站均未找到可用的替代源（选版设置：模式 ${SETTINGS.version_mode}、依据 ${SETTINGS.version_criteria.join(' > ')}），需要人工提供链接。`, ...reportLines].join('\n'));
     return;
   }
 
   const blockers = ingestBlockers(displayTitle);
   const folderId = libraryMap()[displayTitle];
   const canIngest = !blockers.length;
-  const dryRun = async (why) => {
+
+  // any_upgrade 模式：新集处理完之后再做升级检查（不阻塞新集入库）。
+  // dry-run 时只列出可升级项；真转存时按 applyUpgrades 的条件执行替换。
+  const runUpgradeCheck = async () => {
+    if (SETTINGS.version_mode !== 'any_upgrade' || !folderId || !guangya.guangyaConfigured()) {
+      return { lines: [], replaced: [] };
+    }
+    try {
+      await progress(req, 85, '正在检查已入库集数有无更优版本');
+      const existingByEp = await loadExistingByEp(folderId);
+      const shares = usable.map((e) => ({ url: e.cand.url, code: e.cand.code, site: e.cand.site, files: e.files }));
+      const upgrades = planUpgrades(shares, existingByEp, new Set(wantedEps), SETTINGS);
+      return await applyUpgrades({
+        upgrades, folderId, show: { title: displayTitle, year: show?.year }, season, settings: SETTINGS,
+      });
+    } catch (e) {
+      return { lines: [`升级检查未完成：${e.message}`], replaced: [] };
+    }
+  };
+
+  const dryRun = async (why, extraLines = []) => {
     await progress(req, 90, 'dry-run：整理候选报告');
     await done(req, [
       `dry-run：已找到候选，未执行转存（原因：${why}）`,
@@ -308,13 +490,15 @@ export async function handleFix(req) {
       wantedEps.length
         ? `首选来源可补：${[...best.pick.chosen.entries()].map(([ep, f]) => `E${ep}（${f.name}，${rules.formatBytes(f.size)}）`).join('、')}`
         : `首选来源可用：${best.cand.url}（共 ${best.files.length} 个文件）`,
+      ...extraLines,
     ].join('\n'));
   };
 
   // 有待补集：走转存路径（或 dry-run 出报告）
   if (wantedEps.length) {
     if (!canIngest) {
-      await dryRun(blockers.join('；') || '未开启真转存');
+      const up = await runUpgradeCheck();
+      await dryRun(blockers.join('；') || '未开启真转存', up.lines);
       return;
     }
     await progress(req, 75, '正在转存并改名');
@@ -324,10 +508,14 @@ export async function handleFix(req) {
     });
     const fixedEps = [...best.pick.chosen.keys()].filter((ep) => !res.lost.includes(ep));
     if (fixedEps.length) await markBoardFixed({ key: show?.key, title: displayTitle }, fixedEps, season);
-    const suffix = await drivembySuffix(drivePathsFor(show || { title: displayTitle }, catalog, [season]));
+    const up = await runUpgradeCheck();
+    const suffix = (res.renamed.length || up.replaced.length)
+      ? await drivembySuffix(drivePathsFor(show || { title: displayTitle }, catalog, [season]))
+      : '';
     await done(req, [
       `已从 ${best.cand.site} 补入 ${res.renamed.length} 集：${res.renamed.join('、')}`,
       res.lost.length ? `以下集数转存后未在目标文件夹找到（落地延迟或被改名），请人工复查：${res.lost.map((e) => `E${e}`).join('、')}` : '',
+      ...up.lines,
       ...reportLines,
     ].filter(Boolean).join('\n') + suffix);
     return;
@@ -358,8 +546,10 @@ export async function handleFix(req) {
     return;
   }
 
+  const up = await runUpgradeCheck();
   await done(req, [
     'dry-run：已找到候选，未执行转存（本次情形无需转存或无法判定入库目标）',
+    ...up.lines,
     ...reportLines,
   ].join('\n'));
 }
@@ -395,21 +585,61 @@ export async function handleAdd(req) {
     }
     await progress(req, 40, '正在验分享');
     const files = await guangya.walkShare(url, p.code);
-    const eps = [...new Set(files.map((f) => rules.parseEpisodeNo(f.name)).filter((x) => x != null))].sort((a, b) => a - b);
-    const total = files.reduce((s, f) => s + f.size, 0);
+    const SETTINGS = currentSettings();
+    const total = files.reduce((s, f) => s + Number(f.size), 0);
+
+    // 只排重语义（用户提交的链接）：不拿规格偏好去拒绝任何一集——
+    // 按集号分组，一集多版本时用当前选版设置留最优的一个；与库内已有集
+    // 比对后只处理缺集。无法解析集号的文件原样保留（无法判重）。
+    const byEp = new Map();
+    const noEpFiles = [];
+    for (const f of files) {
+      const ep = rules.parseEpisodeNo(f.name);
+      if (ep == null) { noEpFiles.push(f); continue; }
+      if (!byEp.has(ep)) byEp.set(ep, []);
+      byEp.get(ep).push(f);
+    }
+    const kept = [];
+    const droppedDup = [];
+    for (const [ep, list] of [...byEp.entries()].sort((a, b) => a[0] - b[0])) {
+      const best = list.reduce((b, f) => (rules.compareFiles(f, b, SETTINGS) > 0 ? f : b), list[0]);
+      kept.push({ ep, file: best });
+      for (const f of list) if (f.id !== best.id) droppedDup.push({ ep, file: f });
+    }
+
     const folderId = libraryMap()[url];
+    let existingEps = new Set();
+    if (folderId && guangya.guangyaConfigured()) {
+      const byEpExisting = await loadExistingByEp(folderId).catch(() => new Map());
+      existingEps = new Set(byEpExisting.keys());
+    }
+    const toIngest = kept.filter((k) => !existingEps.has(k.ep));
+    const skippedHave = kept.filter((k) => existingEps.has(k.ep));
+    const transferFiles = [...toIngest.map((k) => k.file), ...noEpFiles];
+
+    const lines = [
+      '按只排重处理用户提交链接：不按规格偏好拒绝任何一集，只保证一集留一个版本、且不与库内重复。',
+      `分享共 ${files.length} 个文件（合计 ${rules.formatBytes(total)}），识别到 ${byEp.size} 集${noEpFiles.length ? `，另有 ${noEpFiles.length} 个文件无法解析集号（原样保留）` : ''}。`,
+      droppedDup.length
+        ? `同集多版本已按选版设置留最优一份，舍弃 ${droppedDup.length} 个：${droppedDup.map((d) => `E${d.ep}「${d.file.name}」`).join('、')}。`
+        : '没有同集多版本，无舍弃。',
+      skippedHave.length ? `库内已有、跳过：${skippedHave.map((k) => `E${k.ep}`).join('、')}。` : '',
+    ];
+
     if (ingestEnabled() && folderId) {
-      await progress(req, 75, '正在转存');
-      await guangya.saveShareFiles(url, folderId, files.map((f) => f.id), p.code);
+      if (transferFiles.length) {
+        await progress(req, 75, '正在转存');
+        await guangya.saveShareFiles(url, folderId, transferFiles.map((f) => f.id), p.code);
+      }
       // 这里只知道目标文件夹 ID、不知道其完整路径，无法按路径触发 Drivemby 刷新，故不调。
-      await done(req, `已验明并转存：分享共 ${files.length} 个文件（合计 ${rules.formatBytes(total)}）已转存到 GUANGYA_LIBRARY_MAP 中该链接对应的文件夹；因请求里没有作品信息，未做改名与看板更新，请人工归类。`);
+      lines.push(transferFiles.length
+        ? `已转存 ${transferFiles.length} 个文件（缺集 ${toIngest.length} 集${noEpFiles.length ? `＋无集号文件 ${noEpFiles.length} 个` : ''}）到 GUANGYA_LIBRARY_MAP 中该链接对应的文件夹；因请求里没有作品信息，未做改名与看板更新，请人工归类。`
+        : '没有需要转存的新文件（识别到的集数都已在库内）。');
+      await done(req, lines.filter(Boolean).join('\n'));
       return;
     }
-    await done(req, [
-      `dry-run：已验明分享可打开，未执行转存。`,
-      `分享内容：共 ${files.length} 个文件，合计 ${rules.formatBytes(total)}${eps.length ? `，识别集数：${eps.map((e) => `E${e}`).join('、')}` : ''}。`,
-      `未转存原因：${ingestBlockers('').join('；') || 'GUANGYA_LIBRARY_MAP 未按分享链接配置入库文件夹'}。`,
-    ].join('\n'));
+    lines.push(`dry-run：未执行转存。待转存缺集：${toIngest.length ? toIngest.map((k) => `E${k.ep}「${k.file.name}」`).join('、') : '无'}。未转存原因：${ingestBlockers('').join('；') || 'GUANGYA_LIBRARY_MAP 未按分享链接配置入库文件夹'}。`);
+    await done(req, lines.filter(Boolean).join('\n'));
     return;
   }
 
@@ -443,28 +673,37 @@ export async function handleWatchscan(req) {
       return;
     }
     await progress(req, 40, '正在逐个查来源');
-    const available = new Map(); // ep -> {file, url}
+    const SETTINGS = currentSettings();
+    const walkedShares = []; // {url, code, site, files}，升级检查要用全量文件
+    const candidatesByEp = new Map(); // ep -> [{file, url, code}]（按来源顺序）
     const sourceNotes = [];
     for (const l of group.links) {
       try {
         const files = await guangya.walkShare(l.url, l.code);
-        let count = 0;
+        walkedShares.push({ url: l.url, code: l.code, site: l.url, files });
         for (const f of files) {
           const ep = rules.parseEpisodeNo(f.name);
           if (ep == null) continue;
-          count++;
-          const prev = available.get(ep);
-          if (!prev || f.size > prev.file.size) available.set(ep, { file: f, url: l.url, code: l.code });
+          if (!candidatesByEp.has(ep)) candidatesByEp.set(ep, []);
+          candidatesByEp.get(ep).push({ file: f, url: l.url, code: l.code });
         }
         sourceNotes.push(`来源 ${l.url}：${files.length} 个文件`);
       } catch (e) {
         sourceNotes.push(`来源 ${l.url}：查失败（${e.message}）`);
       }
     }
+    // 每集按选版设置定版：best 取评分最优，any_upgrade 取先到的。
+    const available = new Map(); // ep -> {file, url, code}
+    for (const [ep, list] of candidatesByEp) {
+      available.set(ep, SETTINGS.version_mode === 'any_upgrade'
+        ? list[0]
+        : list.reduce((best, e) => (rules.compareFiles(e.file, best.file, SETTINGS) > 0 ? e : best), list[0]));
+    }
     const have = rules.parseLibraryHave(show.library_have);
     const pendingEps = (show.pending || []).map(rules.parsePendingEpisode).filter(Boolean).map((x) => x.episode);
     const newEps = [...available.keys()].filter((ep) => !have.has(ep)).sort((a, b) => a - b);
     const stillMissing = pendingEps.filter((ep) => !available.has(ep));
+    const season = (show.pending || []).map(rules.parsePendingEpisode).find(Boolean)?.season || 1;
 
     let ingestNote = '';
     let drvSuffix = '';
@@ -472,7 +711,7 @@ export async function handleWatchscan(req) {
     const ingestible = newEps.filter((ep) => pendingEps.includes(ep));
     if (ingestible.length && ingestEnabled() && folderId) {
       await progress(req, 75, '正在补入新集');
-      // 按来源分组逐个转存（同一集只取已选定的最大文件所在来源）
+      // 按来源分组逐个转存（同一集只转已选定的那个文件所在来源）
       const bySource = new Map();
       for (const ep of ingestible) {
         const hit = available.get(ep);
@@ -481,7 +720,6 @@ export async function handleWatchscan(req) {
       }
       const fixed = [];
       for (const [url, { code, chosen }] of bySource) {
-        const season = (show.pending || []).map(rules.parsePendingEpisode).find(Boolean)?.season || 1;
         const res = await ingestChosen({ sourceUrl: url, code, folderId, show, season, chosen });
         fixed.push(...[...chosen.keys()].filter((ep) => !res.lost.includes(ep)));
         ingestNote += ` 已从 ${url} 补入 ${res.renamed.length} 集${res.lost.length ? `（未落地待复查：${res.lost.map((e) => `E${e}`).join('、')}）` : ''}。`;
@@ -495,10 +733,28 @@ export async function handleWatchscan(req) {
       ingestNote = ` 待补集已有来源但未转存（${ingestBlockers(show.title).join('；') || '未开启真转存'}）。`;
     }
 
+    // any_upgrade 模式：新集补完后，对已入库的集做升级检查（与 fix 共用同一套实现）。
+    let upgradeLines = [];
+    if (SETTINGS.version_mode === 'any_upgrade' && folderId && guangya.guangyaConfigured()) {
+      try {
+        const existingByEp = await loadExistingByEp(folderId);
+        const upgrades = planUpgrades(walkedShares, existingByEp, new Set(ingestible), SETTINGS);
+        const up = await applyUpgrades({ upgrades, folderId, show, season, settings: SETTINGS });
+        upgradeLines = up.lines;
+        if (up.replaced.length && !drvSuffix) {
+          const { catalog } = await panel.getCatalog().catch(() => ({ catalog: null }));
+          drvSuffix = await drivembySuffix(drivePathsFor(show, catalog, [season]));
+        }
+      } catch (e) {
+        upgradeLines = [`升级检查未完成：${e.message}`];
+      }
+    }
+
     await done(req, [
       `《${show.title}》扫描完成：来源共提供 ${available.size} 集，库内已有 ${have.size} 集。`,
       newEps.length ? `新发现（库内没有）：${newEps.map((e) => `E${e}`).join('、')}。` : '没有新集。',
       stillMissing.length ? `待补仍缺：${stillMissing.map((e) => `E${e}`).join('、')}。` : '',
+      ...upgradeLines,
       ...sourceNotes,
       ingestNote.trim(),
     ].filter(Boolean).join('\n') + drvSuffix);

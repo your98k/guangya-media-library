@@ -136,6 +136,75 @@ app.get('/api/requests/latest-catalog-refresh', (req, res) => {
   res.json({ request: row ? rowToRequest(row) : null });
 });
 
+/* ---------------- version selection settings ----------------
+ * 选版设置存 settings 表（key-value，value 为 JSON）。从未保存过时，
+ * 返回由环境变量 VERSION_POLICY 映射出的默认值：
+ *   max → { best,        ['size'], bigger  }
+ *   min → { best,        ['size'], smaller }
+ *   any → { any_upgrade, ['size'], bigger  }
+ *   无 env（或空）→ { best, ['resolution','hdr','size'], bigger }
+ */
+
+const VERSION_MODES = ['best', 'any_upgrade'];
+const VERSION_CRITERIA = ['resolution', 'hdr', 'size'];
+const VERSION_SIZE_PREFERS = ['bigger', 'smaller'];
+const VERSION_SETTING_KEYS = ['version_mode', 'version_criteria', 'version_size_prefer'];
+
+function envVersionSettings() {
+  const p = String(process.env.VERSION_POLICY || '').trim().toLowerCase();
+  if (p === 'min') return { version_mode: 'best', version_criteria: ['size'], version_size_prefer: 'smaller' };
+  if (p === 'any') return { version_mode: 'any_upgrade', version_criteria: ['size'], version_size_prefer: 'bigger' };
+  if (p) return { version_mode: 'best', version_criteria: ['size'], version_size_prefer: 'bigger' };
+  return { version_mode: 'best', version_criteria: ['resolution', 'hdr', 'size'], version_size_prefer: 'bigger' };
+}
+
+function getVersionSettings() {
+  const out = envVersionSettings();
+  const rows = db.prepare('SELECT key, value FROM settings').all();
+  for (const r of rows) {
+    if (!VERSION_SETTING_KEYS.includes(r.key)) continue;
+    const v = parseJson(r.value, undefined);
+    if (v !== undefined) out[r.key] = v;
+  }
+  return out;
+}
+
+function validateVersionSettings(body) {
+  const errors = [];
+  const patch = {};
+  if ('version_mode' in body) {
+    if (VERSION_MODES.includes(body.version_mode)) patch.version_mode = body.version_mode;
+    else errors.push(`version_mode 必须是 ${VERSION_MODES.join(' / ')}`);
+  }
+  if ('version_criteria' in body) {
+    const c = body.version_criteria;
+    if (!Array.isArray(c) || !c.length || c.length > VERSION_CRITERIA.length
+      || new Set(c).size !== c.length || c.some((x) => !VERSION_CRITERIA.includes(x))) {
+      errors.push(`version_criteria 必须是由 ${VERSION_CRITERIA.join(' / ')} 组成的不重复有序数组（至少 1 项）`);
+    } else patch.version_criteria = c;
+  }
+  if ('version_size_prefer' in body) {
+    if (VERSION_SIZE_PREFERS.includes(body.version_size_prefer)) patch.version_size_prefer = body.version_size_prefer;
+    else errors.push(`version_size_prefer 必须是 ${VERSION_SIZE_PREFERS.join(' / ')}`);
+  }
+  return { patch, errors };
+}
+
+app.get('/api/settings', (req, res) => {
+  res.json(getVersionSettings());
+});
+
+app.put('/api/settings', (req, res) => {
+  const { patch, errors } = validateVersionSettings(req.body || {});
+  if (errors.length) return res.status(400).json({ error: errors.join('；') });
+  if (!Object.keys(patch).length) {
+    return res.status(400).json({ error: '没有可保存的设置项（version_mode / version_criteria / version_size_prefer）' });
+  }
+  const ins = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+  for (const [k, v] of Object.entries(patch)) ins.run(k, JSON.stringify(v));
+  res.json(getVersionSettings());
+});
+
 /* ---------------- UI writes ---------------- */
 
 function badShareUrl(res) {
@@ -275,6 +344,10 @@ function workerAuth(req, res, next) {
   return res.status(401).json({ error: 'worker token 无效或缺失（Authorization: Bearer <WORKER_TOKEN>）' });
 }
 app.use('/api/worker', workerAuth);
+
+app.get('/api/worker/settings', (req, res) => {
+  res.json(getVersionSettings());
+});
 
 app.get('/api/worker/requests/pending', (req, res) => {
   const rows = db.prepare("SELECT * FROM requests WHERE status IN ('pending','processing') ORDER BY id ASC").all();

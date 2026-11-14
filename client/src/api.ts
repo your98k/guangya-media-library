@@ -1,6 +1,6 @@
 import type {
   Board, Catalog, Issue, PanelRequest, ShowScanState,
-  UnclassifiedSchedule, WatchLinkGroup, WatchScanStatus,
+  UnclassifiedSchedule, VersionSettings, WatchLinkGroup, WatchScanStatus,
 } from './types';
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -20,6 +20,9 @@ export const api = {
   showScanStates: () => req<{ states: ShowScanState[] }>('/api/watch-show-scan-states'),
   unclassifiedSchedule: () => req<UnclassifiedSchedule>('/api/unclassified-scan-schedule'),
   requests: () => req<{ requests: PanelRequest[] }>('/api/requests'),
+  settings: () => req<VersionSettings>('/api/settings'),
+  saveSettings: (body: VersionSettings) =>
+    req<VersionSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(body) }),
   latestCatalogRefresh: () => req<{ request: PanelRequest | null }>('/api/requests/latest-catalog-refresh'),
 
   submitSearch: (body: { mode: string; query: string; id_type?: string }) =>

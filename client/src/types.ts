@@ -78,6 +78,14 @@ export interface UnclassifiedSchedule {
   next_scan_at: string | null;
 }
 
+export type VersionCriterion = 'resolution' | 'hdr' | 'size';
+
+export interface VersionSettings {
+  version_mode: 'best' | 'any_upgrade';
+  version_criteria: VersionCriterion[];
+  version_size_prefer: 'bigger' | 'smaller';
+}
+
 export type RequestKind = 'search' | 'add' | 'fix' | 'scan' | 'watchscan' | 'link' | 'catalog_refresh';
 export type RequestStatus = 'pending' | 'processing' | 'done' | 'failed' | 'cancelled' | 'expired';
 

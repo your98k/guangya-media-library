@@ -9,11 +9,15 @@
  * 环境变量一览见 worker/real/README.md。这里只列主循环用到的：
  *   API_BASE            面板地址，默认 http://localhost:8080
  *   WORKER_TOKEN        面板 worker 令牌（必填，与面板一致）
- *   WORKER_POLL_SECONDS 轮询间隔秒数，默认 15
+ *   WORKER_POLL_SECONDS 请求队列轮询间隔秒数，默认 15
+ *   WATCH_POLL_MINUTES  自主追更轮询间隔分钟数，默认 30，设 0 关闭
+ * 两个循环并行：请求队列循环领取面板请求；自主追更轮询自己定时查
+ * 已登记来源补缺集（watchpoll.mjs），日常自动化不依赖任何智能体。
  */
 
 import * as panel from './panel.mjs';
-import { handlers } from './tasks.mjs';
+import { handlers, refreshVersionSettings } from './tasks.mjs';
+import { startWatchPoll } from './watchpoll.mjs';
 import { tmdbConfigured } from './tmdb.mjs';
 import { guangyaConfigured } from './guangya.mjs';
 import { jiaofuConfigured, miniConfigured } from './sources.mjs';
@@ -66,13 +70,29 @@ async function main() {
   log(`聚合站检索：教父网 ${jiaofuConfigured() ? '开' : '关（未配置 JIAOFU_COOKIE）'}；迷你影视 ${miniConfigured() ? '开' : '关（未配置 MINI_COOKIE）'}`);
   log(`光鸭接口：${guangyaConfigured() ? '开（登录态已配置）' : '关（未配置 GUANGYA_COOKIE / GUANGYA_SESSION_FILE，验源与转存不可用）'}`);
   log(`真转存：${process.env.GUANGYA_INGEST === 'on' ? '开（GUANGYA_INGEST=on）' : '关（dry-run：只检索验源出报告，不动网盘）'}`);
-  log(`版本偏好：${String(process.env.VERSION_POLICY || 'max').toLowerCase()}（VERSION_POLICY：max 取最大高码 / min 取最小低码 / any 第一个找到的，纯个人口味）`);
+  log(`版本偏好回退值：VERSION_POLICY=${String(process.env.VERSION_POLICY || '（未设置）').toLowerCase()}（仅面板从未保存过「选版设置」时作映射默认，面板保存后以面板为准）`);
   log(`Drivemby 联动：${drivembyConfigured() ? `开（${drivembyRefreshUrl()}）` : '关（未配置 DRIVEMBY_TOKEN）'}`);
-  log(`轮询间隔：${POLL_MS / 1000}s`);
+  log(`请求轮询间隔：${POLL_MS / 1000}s`);
 
+  const fmtSettings = ({ settings, source }) =>
+    `选版设置：模式 ${settings.version_mode}；依据 ${settings.version_criteria.join(' > ')}；文件大小 ${settings.version_size_prefer === 'smaller' ? '越小越好' : '越大越好'}；来源 ${source === 'panel' ? '面板设置' : 'env 回退（VERSION_POLICY）'}`;
+  log(fmtSettings(await refreshVersionSettings()));
+
+  // 自主追更轮询与请求队列循环并行（WATCH_POLL_MINUTES 控制，默认 30 分钟）
+  const stopWatchPoll = startWatchPoll({ isStopping: () => stopping });
+
+  let lastSettingsLogKey = '';
   while (!stopping) {
     try {
+      const vs = await refreshVersionSettings();
       const pending = await panel.getPending();
+      if (pending.length) {
+        const key = JSON.stringify(vs);
+        if (key !== lastSettingsLogKey) {
+          log(`本轮${fmtSettings(vs)}`);
+          lastSettingsLogKey = key;
+        }
+      }
       for (const req of pending) {
         if (stopping) break;
         if (req.status !== 'pending') continue;
@@ -84,6 +104,7 @@ async function main() {
     // 分段睡眠，方便 SIGTERM 及时生效
     for (let waited = 0; waited < POLL_MS && !stopping; waited += 500) await sleep(Math.min(500, POLL_MS - waited));
   }
+  stopWatchPoll();
   log('已退出');
 }
 

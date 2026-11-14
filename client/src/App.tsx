@@ -4,6 +4,7 @@ import CatalogSection from './components/Catalog';
 import RequestsList from './components/RequestsList';
 import SearchAdd, { type SearchAddHandle } from './components/SearchAdd';
 import UnclassifiedPanel from './components/UnclassifiedPanel';
+import VersionSettingsPanel from './components/VersionSettings';
 import WatchBoard from './components/WatchBoard';
 import type {
   Board, Catalog, Issue, PanelRequest, ShowScanState,
@@ -79,6 +80,7 @@ export default function App() {
 
       {banner && <div className={banner.ok ? 'ok-banner' : 'error-banner'}>{banner.msg}</div>}
 
+      <VersionSettingsPanel flash={flash} />
       <WatchBoard
         board={board} linkGroups={linkGroups} issues={issues} states={showStates}
         scanStatus={scanStatus} requests={requests}
