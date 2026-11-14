@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fb923c"/>
+      <stop offset="0.55" stop-color="#f97316"/>
+      <stop offset="1" stop-color="#ea580c"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="440" fill="url(#bg)"/>
+  <circle cx="1150" cy="40" r="190" fill="#ffffff" opacity="0.08"/>
+  <circle cx="90" cy="430" r="150" fill="#ffffff" opacity="0.08"/>
+  <circle cx="1220" cy="380" r="70" fill="#ffffff" opacity="0.10"/>
+
+  <!-- duck mark -->
+  <g>
+    <ellipse cx="238" cy="238" rx="118" ry="76" fill="#ffffff"/>
+    <polygon points="330,196 392,164 372,232" fill="#ffffff"/>
+    <circle cx="152" cy="150" r="52" fill="#ffffff"/>
+    <polygon points="112,146 58,162 114,176" fill="#ffedd5"/>
+    <circle cx="138" cy="140" r="7" fill="#ea580c"/>
+    <ellipse cx="248" cy="246" rx="56" ry="30" fill="#ffedd5" opacity="0.85"/>
+  </g>
+
+  <text x="430" y="196" font-family="'PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif" font-size="96" font-weight="700" fill="#ffffff" letter-spacing="4">光鸭影视库</text>
+  <text x="434" y="248" font-family="Verdana, Geneva, sans-serif" font-size="25" fill="#ffedd5" letter-spacing="7">GUANGYA MEDIA LIBRARY</text>
+  <text x="434" y="306" font-family="'PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif" font-size="31" fill="#ffffff">自托管影视库管理面板 · 追更看板 / 全量目录 / 未分类自动整理</text>
+
+  <g font-family="'PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif" font-size="22" fill="#ffffff">
+    <rect x="434" y="338" width="196" height="42" rx="21" fill="#ffffff" opacity="0.22"/>
+    <text x="532" y="367" text-anchor="middle">Docker 一键部署</text>
+    <rect x="646" y="338" width="186" height="42" rx="21" fill="#ffffff" opacity="0.22"/>
+    <text x="739" y="367" text-anchor="middle">React + Node</text>
+    <rect x="848" y="338" width="196" height="42" rx="21" fill="#ffffff" opacity="0.22"/>
+    <text x="946" y="367" text-anchor="middle">SQLite 本地数据</text>
+    <rect x="1060" y="338" width="150" height="42" rx="21" fill="#ffffff" opacity="0.22"/>
+    <text x="1135" y="367" text-anchor="middle">Worker API</text>
+  </g>
+</svg>
