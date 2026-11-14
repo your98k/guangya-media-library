@@ -207,7 +207,7 @@ export default function WatchBoard({ board, linkGroups, issues, states, scanStat
                 await api.submitFix({ tmdb_id: i.tmdb_id, title: i.title, issue_type: i.issue_type, issue_text: i.issue_text });
                 flash('已提交修复请求，等待后台处理', true); onChanged();
               } catch (e) { flash(e instanceof Error ? e.message : '提交失败', false); }
-            }}>让系统修复</button>
+            }}>提交修复请求</button>
             <button className="small" onClick={() => provideLink(i.title ?? '')}>我来提供链接</button>
           </div>
         </div>
