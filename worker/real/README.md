@@ -21,10 +21,10 @@
 WORKER_TOKEN=与面板一致的暗号 API_BASE=http://localhost:8080 node worker/real/index.mjs
 ```
 
-或用 Docker（仓库根目录的 compose 已带 `worker` profile，默认不启动）：
+或用 Docker：仓库根目录的 compose 已经把 worker 与面板放在一起，部署面板的那条命令会把它一并自动部署，不需要单独操作：
 
 ```bash
-docker compose --profile worker up -d --build
+docker compose up -d --build
 ```
 
 启动日志会逐项列出每个集成的开/关状态（TMDB、两站检索、光鸭、真转存、Drivemby），先看这份清单就知道还缺什么配置。

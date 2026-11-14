@@ -107,6 +107,7 @@ docker compose up -d
 
 - 第一次运行会先**构建镜像**（下载基础镜像＋打包前后端），需要几分钟，属正常现象；之后再启动就是秒开。
 - `-d` 表示在后台运行，关掉终端窗口也不会停。
+- 这条命令会**同时启动两个容器**：面板和负责干活的 worker（定时轮询、转存、改名这些自动化都是它在跑），不需要再单独部署 worker。worker 的账号类配置还没填时它只会待命，并在日志里列出缺什么，不影响面板使用。
 
 确认它真的跑起来了：
 
@@ -120,7 +121,7 @@ docker compose logs -f  # 看实时日志；按 Ctrl+C 只是退出看日志，�
 浏览器打开 **http://localhost:8080**（第 2 步改过端口的话用新端口）。
 
 - 在**同一台机器**上装的，用 `localhost`；想在手机或另一台电脑上打开，把 `localhost` 换成这台机器的局域网 IP，例如 `http://192.168.1.10:8080`。
-- 第一次打开看到的是几部「示例」剧目和示例数据，**这是正常的**——那是给你看界面长什么样的演示内容；接入你自己的 worker 同步真实数据后会被替换掉。
+- 第一次打开看到的是几部「示例」剧目和示例数据，**这是正常的**——那是给你看界面长什么样的演示内容；worker 配好你的账号、同步真实数据后会被替换掉。
 
 ### 常用运维小抄
 
@@ -166,7 +167,7 @@ WORKER_TOKEN=你在.env里填的暗号 API_BASE=http://localhost:8080 npm run wo
 - 想让示例 worker 的搜索走**真实 TMDB**：去 [TMDB 官网](https://www.themoviedb.org/)注册后在设置里申请一个 API Key，启动时多带一个变量：`TMDB_API_KEY=你的key WORKER_TOKEN=你的暗号 API_BASE=http://localhost:8080 npm run worker`。
 - 写你自己的 worker 时，只需照着 [docs/API.md](docs/API.md) 请求这些接口，并在请求头带上 `Authorization: Bearer <WORKER_TOKEN>`。
 
-仓库另附一个**真实 worker 骨架**（[`worker/real/`](worker/real/README.md)），与上面的示例 worker（只模拟演示）不同：它内置**自主追更轮询**，自己定时查已登记的来源、验源、补缺集、改名、排重、刷新看板——日常自动化全自动，不依赖任何 AI 智能体；选版按面板「选版设置」执行（模式＋依据排序，保存即生效；环境变量 `VERSION_POLICY` 只在面板从未保存过设置时作回退默认）。只有去教父网 / 迷你影视**搜新源、失效换源**这类需要判断的活不能保证全自动（受站点登录墙/验证码影响，骨架会尝试并如实回写）。使用它需要部署者自备各站登录 Cookie、光鸭登录态与 TMDB key；**默认 dry-run**，只检索验源并把候选报告写回请求，不动网盘；配置齐全并开启 `GUANGYA_INGEST=on` 后才真转存，真转存成功后还可联动 Drivemby 刷新入库目录。启用方式：`docker compose --profile worker up -d --build`，环境变量与诚实边界见其 [README](worker/real/README.md)。
+仓库另附一个**真实 worker 骨架**（[`worker/real/`](worker/real/README.md)），与上面的示例 worker（只模拟演示）不同：它内置**自主追更轮询**，自己定时查已登记的来源、验源、补缺集、改名、排重、刷新看板——日常自动化全自动，不依赖任何 AI 智能体；选版按面板「选版设置」执行（模式＋依据排序，保存即生效；环境变量 `VERSION_POLICY` 只在面板从未保存过设置时作回退默认）。只有去教父网 / 迷你影视**搜新源、失效换源**这类需要判断的活不能保证全自动（受站点登录墙/验证码影响，骨架会尝试并如实回写）。使用它需要部署者自备各站登录 Cookie、光鸭登录态与 TMDB key；**默认 dry-run**，只检索验源并把候选报告写回请求，不动网盘；配置齐全并开启 `GUANGYA_INGEST=on` 后才真转存，真转存成功后还可联动 Drivemby 刷新入库目录。它已包含在仓库的 compose 里，跟面板同一条 `docker compose up -d` 一起自动部署，不需要单独启用（注意别再同时单独运行示例 worker，两者会抢同一批请求）；环境变量与诚实边界见其 [README](worker/real/README.md)。
 
 ### 常见问题
 

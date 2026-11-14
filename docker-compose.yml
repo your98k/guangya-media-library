@@ -13,11 +13,10 @@ services:
       TZ: Asia/Shanghai
     restart: unless-stopped
 
-  # 真实 worker 骨架（worker/real）：默认不启动，需要时显式带 profile：
-  #   docker compose --profile worker up -d --build
-  # 不带 --profile worker 时行为与之前完全一致。
+  # 真实 worker（worker/real）：与面板同一服务组，`docker compose up -d` 会一并自动部署，
+  # 不需要单独启用。没填账号类配置时它只会待命并在日志里列出缺什么，不影响面板使用。
+  # 注意：不要再同时单独运行示例 worker（worker/example-worker.mjs），两者会抢同一批请求。
   worker:
-    profiles: ["worker"]
     build:
       context: .
       dockerfile: worker/real/Dockerfile
